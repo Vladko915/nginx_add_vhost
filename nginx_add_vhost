@@ -1,0 +1,148 @@
+#!/bin/bash
+# Create virtual host from nginx.
+
+echo -ne "\nCreate virtual host from nginx
+Example: newhost.com
+For cancel enter: exit 
+--------------------------
+Please enter your hostname: "
+
+read new_vhost;
+
+if [ "$new_vhost" == "" ]; then
+    echo -e  "Your not enter the hostname. Bye. \n"
+    exit 1
+fi
+
+if [ "$new_vhost" == "exit" ]; then
+    echo -e  "Your enter 'exit'. Bye. \n"
+    exit 0
+fi
+
+#host to lower
+new_vhost=$(echo "$new_vhost" | tr '[:upper:]' '[:lower:]') 
+
+regexp="^(([[:alnum:]-]{,20})\.)?([[:alnum:]-]{,20})\.[[:alnum:]]{2,10}$"
+
+if [[ "$new_vhost" =~ $regexp ]]; then
+    echo -e  "hostname is correct \n"
+else
+    echo -e "hostname not correct. Bye \n"
+    exit 1
+fi
+
+
+s_nginx_new_server_config="
+# Virtual Host configuration for ${new_vhost}
+
+server {
+	listen 127.0.0.1:80;
+	server_name ${new_vhost};
+	root /var/www/${new_vhost};
+	index index.php;
+
+	location / {
+		try_files \$uri \$uri/ =404;
+	}
+
+
+# pass PHP scripts to FastCGI server
+
+#location ~ \.php$ {
+#	include snippets/fastcgi-php.conf;
+#
+#	# With php-fpm (or other unix sockets):
+#	fastcgi_pass unix:/var/run/php/php7.2-fpm.sock;
+#	# With php-cgi (or other tcp sockets):
+#	fastcgi_pass 127.0.0.1:9000;
+#}
+
+# deny access to .htaccess files, if Apache's document root
+# concurs with nginx's one
+#
+#location ~ /\.ht {
+#	deny all;
+#}
+
+}";
+
+
+s_nginx_def_conf_file="/etc/nginx/sites-available/default"
+f_nginx_new_conf_file="/etc/nginx/sites-available/${new_vhost}.conf"
+link_nginx_new_conf_file="/etc/nginx/sites-enabled/${new_vhost}.conf"
+
+if [ -e "$s_nginx_def_conf_file" ]; then
+
+	echo -e "Found default nginx config: '${s_nginx_def_conf_file}'\n"
+
+	touch $f_nginx_new_conf_file;
+	
+	md5sum_new_conf=$(md5sum $f_nginx_new_conf_file)
+	
+	#if new config  is writable.
+	if [ -w "$f_nginx_new_conf_file" ]; then
+	   echo -e "${s_nginx_new_server_config}" > $f_nginx_new_conf_file
+	   
+	   md5sum_new_conf_replace=$(md5sum $f_nginx_new_conf_file)
+	   if [ "$md5sum_new_conf" == "$md5sum_new_conf_replace" ]; then
+	      echo -e  "Error. Not updated ${f_nginx_new_conf_file}. Sorry.  \n"
+	      exit 1
+	   fi
+	   
+	   echo -e "Created new nginx config: '${f_nginx_new_conf_file}'\n"
+
+         ln -s $f_nginx_new_conf_file $link_nginx_new_conf_file
+
+	    echo -e "Created link for nginx config: '${link_nginx_new_conf_file}'\n"
+
+
+	   new_hosting_dir="/var/www/${new_vhost}"
+	   index_file_4_host="${new_hosting_dir}/index.php"
+
+	   mkdir -pv "$new_hosting_dir";
+
+	   if [ -d "$new_hosting_dir" ]; then
+
+	 	 touch "$index_file_4_host";
+
+		 #if index-file is writable.
+		 if [ -w "$index_file_4_host" ]; then
+		    echo "<html><head></head><body><h1>Welcome to ${new_vhost}</h1></body></html>" > "$index_file_4_host"
+		 fi
+
+	   	 chmod -Rv 755 "${new_hosting_dir}"
+	   	 chown -Rv user:user "${new_hosting_dir}"
+
+		 #check  correct  configs
+		 nginx -t  
+
+             #reload file-config
+		 nginx -s reload
+
+
+		 path_to_hosts="/etc/hosts";
+
+		 #if hosts file is writable.
+		 if [ -w "$path_to_hosts" ]; then
+		 	sed  -i "1i 127.0.0.1\t${new_vhost}" "${path_to_hosts}"  #write as first line
+			echo -e  "Add record to '${path_to_hosts}'.  \n"
+		 else
+		      echo -e  "Error. ${path_to_hosts} not writable.Sorry.  \n"
+		      exit 1			
+		 fi
+
+		 echo -e "\nCongratulation, Your virtual host '${new_vhost}' configured. Enjoy!\n";
+	
+		 exit 0;
+		 
+	   else
+		echo "Directory '$new_hosting_dir' does not exist."
+		exit 1
+	   fi #if isset new_hosting_dir	   
+	   	
+	fi #if new config  is writable.
+
+else
+	echo "$s_nginx_def_conf_file does not exist"
+	exit 1
+fi   #if isset default config for virtual host from nginx
